@@ -8,7 +8,8 @@ import {
     DropdownItem, Modal, ModalHeader,
     ModalBody, ModalFooter, Container,
     Row, Col, CardHeader, CardBody,
-    ListGroupItemHeading,
+    ListGroupItemHeading, NavItem,
+    Badge, CardFooter, UncontrolledButtonDropdown,
 } from 'reactstrap';
 import HTML5Backend from 'react-dnd-html5-backend';
 import { DragSource, DragDropContext, DropTarget } from 'react-dnd';
@@ -19,6 +20,7 @@ const itemsAvailable = [...Array(200).keys()].map(k => {
     return {
         name: `Item ${k}`,
         price: Math.round(1000*Math.random())/100,
+        calorie_count: Math.round(1000*Math.random())/10,
     };
 });
 
@@ -26,6 +28,7 @@ const ItemType = Symbol('ItemType');
 
 const filterOptions = {
     price: {name: 'Price', up: true },
+    calorie_count: {name: 'Calories', up: true},
 };
 
 const Item = DragSource(
@@ -33,20 +36,60 @@ const Item = DragSource(
         { beginDrag(props){ return props.item; } },
         (connect, monitor) => { return {connectDragSource: connect.dragSource()}; })(
     (props) => {
-        const {connectDragSource, item, onClick} = props;
+        const {connectDragSource, item} = props;
         const onDelete = props.onDelete || false;
+        const onBuy = props.onBuy || false;
+        const onClick = props.onClick || (()=>{});
+        const onAddToList = props.onAddToList || false;
+        const lists = props.lists || [];
+        const filterSpec = props.filterSpec || [];
         return connectDragSource(
             <div>
-            <Card body>
-                <a onClick={onClick}>
+            <Card>
+                <CardBody tag="a" onClick={onClick}>
                     <CardTitle>
                         { onDelete ? (<Button className="close" onClick={onDelete}>
                             <span aria-hidden="true">&times;</span>
                         </Button>) : '' }
                         {item.name}
                     </CardTitle>
-                    <CardText> {`Price: ${item.price}`} </CardText>
-                </a>
+                    <CardText>
+                        {`Price: ${item.price}`}
+                        { filterSpec.filter( f => f.key !== 'price').map( f => 
+                            (<span> <br />
+                            { `${f.name}: ${item[f.key]}` } </span> )
+                        )}
+                    </CardText>
+                </CardBody>
+                <CardFooter>
+                    <ButtonGroup>
+                    { onBuy? (
+                        <Button size="sm" onClick={e => {
+                            e.stopPropagation();
+                            onBuy(e);
+                        }}>+ to Cart</Button>
+                        ) : '' }
+                    { onAddToList? (
+                        <UncontrolledButtonDropdown size="sm">
+                            <DropdownToggle caret>
+                                + to List
+                            </DropdownToggle>
+                            <DropdownMenu>
+                            {
+                                lists.length === 0 ?
+                                    <DropdownItem header>You have to create a list first</DropdownItem>
+                                    : lists.map( (list, i) => (
+                                        <DropdownItem onClick={e=>{
+                                            e.stopPropagation();
+                                            onAddToList(i);
+                                        }}>{list.name}</DropdownItem>
+                                    ))
+                            }
+                            </DropdownMenu>
+                        </UncontrolledButtonDropdown>
+                        ) : '' }
+                    </ButtonGroup>
+                </CardFooter>
             </Card>
             </div>
         );
@@ -62,22 +105,25 @@ const List = DropTarget(
     (props) => {
         const {
             connectDropTarget, list, onToggleCollapse, onDelete,
-            onNameChange, onDeleteItem
+            onNameChange, onDeleteItem, onBuyItem, onBuyList,
         } = props;
         return connectDropTarget(<div>
             <ListGroupItem>
                 <ListGroupItemHeading>
                     <InputGroup>
-                    <Input type="text" value={list.name} onChange={onNameChange}/>
-                    <InputGroupButton onClick={onToggleCollapse}>
-                        {list.show ? '-' : '+'}
-                    </InputGroupButton>
-                    <InputGroupButton className="close" onClick={onDelete}>
-                        <span aria-hidden="true">&times;</span>
-                    </InputGroupButton>
+                        <Input type="text" value={list.name} onChange={onNameChange}/>
+                        <InputGroupButton onClick={onToggleCollapse}>
+                            {list.show ? '-' : '+'}
+                        </InputGroupButton>
+                        <InputGroupButton className="close" onClick={onDelete}>
+                            <span aria-hidden="true">&times;</span>
+                        </InputGroupButton>
                     </InputGroup>
                 </ListGroupItemHeading>
                 <Collapse isOpen={list.show}>
+                <ListGroupItemHeading>
+                    <Button size="sm" onClick={onBuyList}>Purchase all items</Button>
+                </ListGroupItemHeading>
                 {
                     list.items.length === 0 ? (<p className="text-muted">Drag items here to add them to the list.</p>)
                         : list.items.map( (item, j) => (
@@ -85,14 +131,16 @@ const List = DropTarget(
                             item={item}
                             key={j}
                             onClick={()=>{}}
-                            onDelete={() => onDeleteItem(j)} />
+                            onDelete={() => onDeleteItem(j)}
+                            onBuy={() => onBuyItem(item)}/>
                     ))
                 }
                 </Collapse>
             </ListGroupItem>
         </div>);
     });
-        
+
+const ListItem = Item;
 
 class App extends Component {
     constructor(props){
@@ -107,6 +155,8 @@ class App extends Component {
             }, {}),
             lists: [],
             showLists: false,
+            cartItems: [],
+            showCart: false,
         };
     }
     render() {
@@ -115,10 +165,17 @@ class App extends Component {
             <Navbar color="success" className="sticky-top" style={{minHeight: '4rem'}}>
                 <NavbarBrand className="text-dark" href="/">Save on Foods</NavbarBrand>
                 <Nav navbar>
-                        <InputGroup>
-                            <Input type="text" id="search" placeholder="Search" onChange={ev => this.setState({searchTerm: ev.target.value})}/>
+                    { this.state.showCart ?
+                        ''
+                        : (<InputGroup>
+                            <Input type="text" id="search" placeholder="Search"
+                                value={this.state.searchTerm}
+                                onChange={ev =>
+                                    this.setState({searchTerm: ev.target.value})}
+                                />
                             <InputGroupButton>
-                                <ButtonDropdown isOpen={this.state.displayFilter} toggle={() => this.setState({displayFilter: !this.state.displayFilter})}>
+                                <ButtonDropdown isOpen={this.state.displayFilter} toggle={() =>
+                                        this.setState({displayFilter: !this.state.displayFilter})}>
                                     <DropdownToggle caret>Filter</DropdownToggle>
                                     <DropdownMenu right>
                                         <DropdownItem header>
@@ -168,7 +225,35 @@ class App extends Component {
                                     </DropdownMenu>
                                 </ButtonDropdown>
                             </InputGroupButton>
-                        </InputGroup>
+                        </InputGroup>)
+                    }
+                </Nav>
+                <Nav navbar>
+                    <NavItem>
+                        <ButtonGroup>
+                            <Button onClick={()=>{
+                                this.setState({showCart: !this.state.showCart});
+                            }}>
+                                { this.state.showCart?
+                                    'Continue browsing'
+                                    : (<span>Cart {this.state.cartItems.length !==0 ? (
+                                        <Badge color="secondary">{this.state.cartItems.length}</Badge> )
+                                        : ''}</span>)}
+                            </Button>
+                            { this.state.showCart?
+                                (<Button onClick={()=>{
+                                    this.setState({
+                                        lists: [{
+                                            name: 'Shopping Cart',
+                                            show: true,
+                                            items: this.state.cartItems
+                                        }].concat(this.state.lists),
+                                        showLists: true
+                                    });
+                                }}>Save Cart as List</Button>)
+                                : '' }
+                        </ButtonGroup>
+                    </NavItem>
                 </Nav>
             </Navbar>
             <Container fluid><Row>
@@ -232,7 +317,17 @@ class App extends Component {
                                         let lists = this.state.lists.slice();
                                         lists[i].items.unshift(item);
                                         this.setState({lists: lists});
-                                    }} />
+                                    }}
+                                    onBuyItem={item=>{
+                                        let cartItems = this.state.cartItems.slice();
+                                        cartItems.unshift(item);
+                                        this.setState({cartItems: cartItems});
+                                    }}
+                                    onBuyList={()=>{
+                                        this.setState({cartItems:
+                                            list.items.concat(this.state.cartItems)});
+                                    }}
+                                    />
                             ))
                         }
                         </ListGroup>
@@ -242,7 +337,31 @@ class App extends Component {
             </Col>
             <Col md={this.state.showLists? 9:12}>
             <main>
-                { _.chunk(this.state.filters.reduce((acc, filter) =>
+                { this.state.showCart? 
+                    this.state.cartItems.length === 0 ?
+                        ( <p className="text-muted text-center align-middle">There are no items in the cart yet</p> )
+                        : _.chunk(this.state.cartItems, 4).map( (chunk, i) => (
+                            <Row key={i}>
+                            {
+                                chunk.map( (item, j) => (
+                                    <Col key={j} md="3">
+                                        <ListItem lists={this.state.lists} item={item}
+                                            onDelete={() => {
+                                                let cartItems = this.state.cartItems.slice();
+                                                cartItems.splice(i*j, 1);
+                                                this.setState({cartItems: cartItems});
+                                            }}
+                                            onAddToList={listNo => {
+                                                let lists = this.state.lists.slice();
+                                                lists[listNo].items.unshift(item);
+                                                this.setState({lists: lists});
+                                            }}
+                                            />
+                                    </Col>
+                                ))
+                            }
+                            </Row>))
+                    : _.chunk(this.state.filters.slice().reverse().reduce((acc, filter) =>
                             acc.sort((a, b) => 
                                 filter.up ?
                                     a[filter.key] - b[filter.key]
@@ -255,11 +374,23 @@ class App extends Component {
                         <Row key={i}>
                         {chunk.map( item => (
                             <Col key={item.name} md="3">
-                            <Item key={item.name} item={item} onClick={() => {
-                                let modals = this.state.modals;
-                                modals[item.name] = true;
-                                this.setState({modals: modals});
-                            }} />
+                            <Item item={item} lists={this.state.lists} filterSpec={this.state.filters}
+                                onClick={() => {
+                                    let modals = this.state.modals;
+                                    modals[item.name] = true;
+                                    this.setState({modals: modals});
+                                }}
+                                onBuy={() => {
+                                    let cartItems = this.state.cartItems.slice();
+                                    cartItems.unshift(item);
+                                    this.setState({cartItems: cartItems});
+                                }}
+                                onAddToList={listNo => {
+                                    let lists = this.state.lists.slice();
+                                    lists[listNo].items.unshift(item);
+                                    this.setState({lists: lists});
+                                }}
+                                />
                             </Col>
                         )) }
                         </Row>
@@ -276,7 +407,14 @@ class App extends Component {
                         this.setState({modals: modals});
                     }}>
                         <ModalHeader>{item.name}</ModalHeader>
-                        <ModalBody>insert lorem ipsum here</ModalBody>
+                        <ModalBody>
+                            insert lorem ipsum here
+                            {
+                                Object.keys(item).filter(k => k !== 'name').map( k => {
+                                    return (<span><br />{filterOptions[k].name}: {item[k]}</span>);
+                                })
+                            }
+                        </ModalBody>
                         <ModalFooter>
                             <Button onClick={()=>{
                                 let modals = this.state.modals;
