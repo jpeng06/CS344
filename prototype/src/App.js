@@ -434,7 +434,9 @@ class App extends Component {
                             )
                         ,
                         itemsAvailable.slice())
-                    .filter( item => !this.state.searchTerm || item.name.includes(this.state.searchTerm) ), 4)
+                    .filter( item =>
+                        !this.state.searchTerm ||
+                        item.name.toLowerCase().includes(this.state.searchTerm.toLowerCase()) ), 4)
                     .map( (chunk, i) => (
                         <Row key={i}>
                         {chunk.map( item => (
